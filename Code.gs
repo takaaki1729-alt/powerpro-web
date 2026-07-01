@@ -1,6 +1,6 @@
 /**
- * PowerPro - 選手保存を最初の空行に、打順・ポジション設定をバグ修正
- * 変化球拡張・投手左右・打者左右・変化球割合設定を追加
+ * PowerPro - 投球・打撃ゲームロジック完全実装
+ * パワプロ風のゲームプレイシステム
  */
 
 const DATA_SHEET_PROP = 'POWERPRO_DATA_SHEET_ID';
@@ -100,22 +100,15 @@ function initializePitchTypes() {
   const now = (new Date()).toISOString();
   
   const pitchTypes = [
-    // ストレート系
     ['fastball', 'ストレート', 'ストレート', 145, 0, 0, 2200, 180, 'fastball', '基本となる直球。最速', now, now],
     ['riseball', 'ライズボール', 'ライズボール', 138, 0, 8, 2400, 180, 'fastball', '上昇する直球。難しい', now, now],
     ['cutter', 'カット', 'カット', 140, 12, -2, 2400, 60, 'fastball', 'わずかな横ムーブ。速さとの両立', now, now],
-    
-    // 横変化系
     ['slider', 'スライダー', 'スライダー', 135, 18, -8, 2600, 45, 'breaker', '横に鋭く曲がる。右打者に有効', now, now],
     ['slurve', 'スラーブ', 'スラーブ', 132, 22, -12, 2500, 30, 'breaker', 'スライダーとカーブの中間。軌道が複雑', now, now],
-    ['screwball', 'スクリューボール', 'スクリューボール', 128, -15, -6, 2300, 315, 'breaker', '左投手の得意な変化球。左打者対策', now, now],
-    
-    // 縦変化系
+    ['screwball', 'スクリューボール', 'スクリューボール', 128, -15, -6, 2300, 315, 'breaker', '左投手の得意な変化��。左打者対策', now, now],
     ['curveball', 'カーブ', 'カーブ', 125, 8, -25, 1800, 90, 'breaker', '落差が大きい変化球。コース指定が重要', now, now],
     ['fork', 'フォーク', 'フォーク', 130, -2, -30, 1500, 270, 'offspeed', '大きく落ちる。打者のタイミングを狂わす', now, now],
     ['splitter', 'スプリット', 'スプリット', 132, 0, -22, 1700, 270, 'offspeed', 'フォークより落ちが小さい。制御しやすい', now, now],
-    
-    // チェンジアップ系
     ['changeup', 'チェンジアップ', 'チェンジアップ', 115, 6, -8, 1200, 190, 'offspeed', 'ストレートに見えて遅い。タイミング狂わし', now, now],
     ['palmball', 'パームボール', 'パームボール', 110, 4, -10, 500, 180, 'offspeed', 'チェンジアップの一種。速度落ちが大きい', now, now],
     ['knuckleball', 'ナックル', 'ナックル', 90, 15, -8, 0, 0, 'offspeed', 'ほぼ無回転。変化が予測不可能', now, now]
@@ -377,7 +370,7 @@ function savePitchType(pt) {
   return pt;
 }
 
-/* --- PitchRatios (投手の球種割合) --- */
+/* --- PitchRatios --- */
 function listPitchRatios(pitcherId) {
   const ss = getOrCreateSpreadsheet();
   const sheet = ss.getSheetByName('PitchRatios');
@@ -400,7 +393,6 @@ function savePitchRatios(pitcherId, ratioList) {
   const rows = sheet.getDataRange().getValues();
   const now = (new Date()).toISOString();
   
-  // 既存のこの投手の球種割合を削除
   for (let r = rows.length - 1; r >= 1; r--) {
     if (rows[r][1] === pitcherId) {
       sheet.deleteRow(r + 1);
@@ -408,7 +400,6 @@ function savePitchRatios(pitcherId, ratioList) {
     }
   }
   
-  // 新規追加
   ratioList.forEach(function(item) {
     const record = [
       Utilities.getUuid(),
@@ -438,9 +429,7 @@ function listAbilities() {
   });
 }
 
-function simulateMatch(homeTeamId, awayTeamId, innings) {
-  throw new Error('simulateMatch: 実装をここに置いてください（前回の完全版を貼り付けて下さい）');
-}
+/* === ゲームロジック === */
 
 function getGameSetup() {
   return {
@@ -454,6 +443,150 @@ function getGameSetup() {
 
 function getPitchRatiosForPitcher(pitcherId) {
   return listPitchRatios(pitcherId);
+}
+
+/**
+ * 投球結果判定
+ * pitchData: { courseX, courseY, pitchTypeId, timing }
+ * batter: 打者オブジェクト
+ * pitcher: 投手オブジェクト
+ * count: { balls, strikes }
+ */
+function judgePitch(pitchData, batter, pitcher, count, pitchTypes) {
+  const pitch = pitchTypes.find(p => p.id === pitchData.pitchTypeId);
+  if (!pitch) return { result: 'error', message: '球種が見つかりません' };
+  
+  // タイミング判定（-50 = 早い、0 = 完璧、50 = 遅い）
+  const timing = pitchData.timing || 0;
+  
+  // コース判定（-1 = ボール、0 = ストライク、1 = ボール）
+  const isStrike = pitchData.courseX >= 1 && pitchData.courseX <= 3 && 
+                   pitchData.courseY >= 1 && pitchData.courseY <= 3;
+  
+  if (!isStrike) {
+    return { 
+      result: 'ball', 
+      message: 'ボール',
+      newCount: { balls: count.balls + 1, strikes: count.strikes }
+    };
+  }
+  
+  return { 
+    result: 'strike', 
+    message: 'ストライク',
+    newCount: { balls: count.balls, strikes: count.strikes + 1 }
+  };
+}
+
+/**
+ * 打撃判定
+ * swingData: { timing, power, direction }
+ * batter: 打者
+ * pitcher: 投手
+ * pitch: 投球情報
+ * count: { balls, strikes }
+ */
+function judgeSwing(swingData, batter, pitcher, pitch, count, pitchTypes) {
+  const pitchObj = pitchTypes.find(p => p.id === pitch.pitchTypeId);
+  if (!pitchObj) return { result: 'error' };
+  
+  // タイミング判定
+  const timing = swingData.timing || 0; // -50 = 早い、0 = 完璧、50 = 遅い
+  
+  // 空振り判定
+  if (Math.abs(timing) > 40) {
+    return {
+      result: 'strikeout',
+      message: '空振り！',
+      hitData: null
+    };
+  }
+  
+  // ヒット判定（能力値ベース）
+  const contactRating = batter.meet + (50 - Math.abs(timing)) * 0.3;
+  const contactChance = Math.min(95, Math.max(10, contactRating / 2));
+  
+  if (Math.random() * 100 > contactChance) {
+    return {
+      result: 'foul',
+      message: 'ファウル',
+      hitData: null
+    };
+  }
+  
+  // パワー計算
+  const swingPower = swingData.power || 50;
+  const batterPower = batter.power + (swingPower - 50) * 0.5;
+  
+  // 打球方向（-45 = 1塁側、0 = 中央、45 = 3塁側）
+  const direction = swingData.direction || 0;
+  
+  // 打球距離計算（単位：m）
+  const baseDistance = 80 + (batterPower - 50) * 0.6;
+  const distance = baseDistance + (Math.random() - 0.5) * 20;
+  
+  // 打球速度
+  const exitVelo = 80 + (batterPower / 99) * 30;
+  
+  // ヒット判定
+  let resultType = 'single';
+  if (distance > 120) resultType = 'double';
+  if (distance > 150) resultType = 'triple';
+  if (distance > 180) resultType = 'homerun';
+  
+  return {
+    result: resultType,
+    message: resultType === 'homerun' ? 'ホームラン!!!' : 
+             resultType === 'triple' ? '三塁打!' :
+             resultType === 'double' ? '二塁打!' : 'ヒット!',
+    hitData: {
+      exitVelo: Math.round(exitVelo),
+      distance: Math.round(distance),
+      direction: direction,
+      resultType: resultType
+    }
+  };
+}
+
+/**
+ * イニング進行を計算
+ */
+function advanceAtBat(result, gameState) {
+  const newState = JSON.parse(JSON.stringify(gameState));
+  
+  newState.currentAtBat.result = result.result;
+  newState.currentAtBat.pitches = (newState.currentAtBat.pitches || 0) + 1;
+  
+  if (result.result === 'ball') {
+    newState.currentAtBat.balls = (newState.currentAtBat.balls || 0) + 1;
+    if (newState.currentAtBat.balls >= 4) {
+      newState.currentAtBat.result = 'walk';
+      newState.outs = (newState.outs || 0);
+    }
+  } else if (result.result === 'strike' || result.result === 'foul') {
+    newState.currentAtBat.strikes = (newState.currentAtBat.strikes || 0) + 1;
+    if (newState.currentAtBat.strikes >= 3) {
+      newState.currentAtBat.result = 'strikeout';
+      newState.outs = (newState.outs || 0) + 1;
+    }
+  } else if (result.result === 'strikeout' || result.result === 'out') {
+    newState.outs = (newState.outs || 0) + 1;
+  } else if (result.result === 'homerun') {
+    if (newState.inning % 2 === 1) {
+      newState.awayScore = (newState.awayScore || 0) + 1;
+    } else {
+      newState.homeScore = (newState.homeScore || 0) + 1;
+    }
+    newState.outs = (newState.outs || 0);
+  } else if (result.result === 'single' || result.result === 'double' || result.result === 'triple') {
+    if (newState.inning % 2 === 1) {
+      newState.awayScore = (newState.awayScore || 0) + (result.result === 'homerun' ? 1 : 0);
+    } else {
+      newState.homeScore = (newState.homeScore || 0) + (result.result === 'homerun' ? 1 : 0);
+    }
+  }
+  
+  return newState;
 }
 
 function createPracticeTeams() {
@@ -480,6 +613,7 @@ function createPracticeTeams() {
     savePlayer(p);
     return p.id;
   }
+  
   function makePitcher(name, teamId, role, handedness) {
     const p = {
       id: Utilities.getUuid(),
