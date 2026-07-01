@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>PowerPro Web</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 8px; background:#f6f8fa; color:#222; }
+    .layout { display: grid; grid-template-columns: 380px 1fr; gap:12px; align-items:start; }
+    .panel { background:#fff; border:1px solid #e0e0e0; padding:12px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+    h2 { margin:4px 0 12px; }
+    h3 { margin:8px 0 10px; font-size:1.1rem; }
+    label { display:block; margin-top:8px; font-weight:600; font-size:0.95rem; }
+    input, select, textarea { width:100%; padding:8px; margin-top:6px; border-radius:6px; border:1px solid #ccc; }
+    button { padding:8px 10px; border-radius:6px; border:1px solid #90caf9; background:#e3f2fd; cursor:pointer; }
+    button[disabled] { opacity:0.6; cursor:not-allowed; }
+    .row { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .playerList { max-height:300px; overflow:auto; border:1px solid #eee; padding:6px; border-radius:6px; background:#fafafa; }
+    .playerItem { padding:6px; border-bottom:1px solid #f0f0f0; cursor:pointer; }
+    .playerItem:hover { background:#f0f8ff; }
+    .muted { color:#666; font-size:0.9rem; }
+    #overlayMsg { position:fixed; top:8px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.85); color:#fff; padding:10px 14px; border-radius:8px; display:none; z-index:2000; pointer-events:none; }
+    #overlayMsg.active { display:block; pointer-events:auto; }
+    .twoCols { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+    .abilitiesList { max-height:160px; overflow:auto; border:1px solid #eee; padding:8px; border-radius:6px; background:#fff; }
+    .positionWarning { color:#d32f2f; font-size:0.85rem; margin-top:4px; }
+    .handednessControl { display:flex; gap:12px; align-items:center; margin-top:6px; }
+    .handednessControl label { margin:0; display:flex; align-items:center; gap:6px; font-weight:normal; }
+    .handednessControl input[type="radio"] { width:auto; margin:0; }
+    .pitchRatioItem { display:flex; gap:8px; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px; }
+    .pitchRatioItem input { flex:0 0 50px; }
+    .pitchRatioItem span { flex:1; }
+    .cameraButtons { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .cameraButtons button { flex:1 1 80px; padding:6px 4px; font-size:0.85rem; }
+    .cameraButtons button.active { background:#90ee90; border-color:#228b22; }
+    #gameCanvas { width:100%; height:400px; background:#000; border-radius:8px; display:block; }
+  </style>
+</head>
+<body>
+  <h2>⚾ PowerPro Web</h2>
+
+  <div class="layout">
+    <div>
+      <div class="panel">
+        <h3>チーム管理</h3>
+        <label>チーム</label>
+        <div id="teamTabs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+        <div class="row">
+          <input id="teamName" placeholder="チーム名" />
+          <button type="button" data-action="save-team">保存</button>
+          <button type="button" data-action="delete-team" style="background:#ffdede;border-color:#ff9999;">削除</button>
+        </div>
+        <div class="row">
+          <button type="button" data-action="create-practice">練習チーム作成</button>
+          <button type="button" data-action="refresh">再読込</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>選手一覧</h3>
+        <div id="playerList" class="playerList" aria-live="polite"></div>
+        <div class="row">
+          <button type="button" data-action="new-player">新規選手</button>
+          <button type="button" data-action="save-player">選手保存</button>
+          <button type="button" data-action="delete-player" style="background:#ffdede;border-color:#ff9999;">選手削除</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>選手編集</h3>
+        <input type="hidden" id="playerId" />
+        <label>名前<input id="playerName" /></label>
+        <label>チームID<input id="playerTeamId" /></label>
+        <label>ポジション
+          <select id="playerPosition">
+            <option value="">なし</option>
+            <option value="1B">1B</option><option value="2B">2B</option><option value="3B">3B</option>
+            <option value="SS">SS</option><option value="LF">LF</option><option value="CF">CF</option><option value="RF">RF</option>
+            <option value="C">C</option><option value="DH">DH</option><option value="PH">PH</option>
+            <option value="先発">先発</option><option value="中継ぎ">中継ぎ</option><option value="抑え">抑え</option>
+          </select>
+        </label>
+        <div class="positionWarning" id="positionWarning"></div>
+
+        <label>利き腕
+          <div class="handednessControl">
+            <label><input type="radio" name="playerHandedness" value="left" /> 左</label>
+            <label><input type="radio" name="playerHandedness" value="right" checked /> 右</label>
+          </div>
+        </label>
+
+        <div class="twoCols">
+          <div>
+            <label>ミート<input id="stat_meet" type="number" value="50" min="0" max="99" /></label>
+            <label>走力<input id="stat_speed" type="number" value="50" min="0" max="99" /></label>
+            <label>肩力<input id="stat_arm" type="number" value="50" min="0" max="99" /></label>
+          </div>
+          <div>
+            <label>パワー<input id="stat_power" type="number" value="50" min="0" max="99" /></label>
+            <label>守備<input id="stat_defense" type="number" value="50" min="0" max="99" /></label>
+            <label>捕球<input id="stat_catching" type="number" value="50" min="0" max="99" /></label>
+          </div>
+        </div>
+
+        <div id="pitcherSection" style="display:none;">
+          <hr />
+          <div class="twoCols">
+            <div>
+              <label>腕の角度（-20〜90）<input id="stat_armAngle" type="number" value="45" min="-20" max="90" /></label>
+              <label>平均球速<input id="stat_avgSpeed" type="number" value="140" min="80" max="200" /></label>
+            </div>
+            <div>
+              <label>スタミナ<input id="stat_stamina" type="number" value="80" min="0" max="99" /></label>
+              <label>コントロール<input id="stat_control" type="number" value="70" min="0" max="99" /></label>
+            </div>
+          </div>
+          
+          <h4 style="margin:12px 0 8px; font-size:0.95rem;">球種割合</h4>
+          <div id="pitchRatioContainer" style="max-height:200px; overflow-y:auto; border:1px solid #eee; padding:6px; border-radius:4px; background:#fafafa;"></div>
+          <button type="button" data-action="auto-pitch-ratio" style="margin-top:6px; width:100%;">自動配分</button>
+        </div>
+
+        <label>特殊能力<div id="abilitiesList" class="abilitiesList" style="max-height:160px;overflow:auto;"></div></label>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3>試合開始</h3>
+        <div class="row">
+          <label style="flex:1">ホーム<select id="homeTeamSelect"></select></label>
+          <label style="flex:1">ビジター<select id="awayTeamSelect"></select></label>
+        </div>
+        <div class="row">
+          <label>イニング<input id="inningsInput" type="number" value="3" min="1" max="12" /></label>
+          <label>応援チーム<select id="supportTeamSelect"></select></label>
+        </div>
+        <button type="button" data-action="launch-game" style="width:100%; margin-top:8px;">⚾ ゲーム開始</button>
+      </div>
+
+      <div class="panel" id="gamePanel" style="display:none;">
+        <h3>試合中</h3>
+        
+        <label>カメラビュー</label>
+        <div class="cameraButtons">
+          <button type="button" data-camera="CATCHER_BEHIND" class="active">キャッチャー後方</button>
+          <button type="button" data-camera="PITCHER_MOUND">マウンド前方</button>
+          <button type="button" data-camera="THIRD_BASE_STAND">3塁側</button>
+          <button type="button" data-camera="FIRST_BASE_STAND">1塁側</button>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <div style="margin-top:8px; font-size:0.9rem;">
+          <div id="gameScore">スコア: ホーム 0 - 0 ビジター</div>
+          <div id="gameState">試合状況: 準備中</div>
+        </div>
+
+        <button type="button" data-action="end-game" style="width:100%; margin-top:8px;">試合終了</button>
+      </div>
+
+      <div class="panel">
+        <h3>ログ</h3>
+        <textarea id="log" rows="12" style="width:100%;"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlayMsg" role="status" aria-live="polite"></div>
+
+<script>
+/* グローバル状態 */
+let state = {
+  players: [],
+  teams: [],
+  pitchTypes: [],
+  abilities: [],
+  currentTeam: null,
+  game: null,
+  currentCamera: 'CATCHER_BEHIND'
+};
+
+function log(msg) {
+  const ta = document.getElementById('log');
+  if (ta) ta.value = (new Date()).toLocaleTimeString() + ' - ' + msg + '\n' + ta.value;
+  console.log(msg);
+}
+
+function showOverlay(msg, ms = 1200) {
+  const o = document.getElementById('overlayMsg');
+  o.textContent = msg;
+  o.classList.add('active');
+  setTimeout(() => { o.classList.remove('active'); o.textContent = ''; }, ms);
+}
+
+function showPersistentOverlay(msg) {
+  const o = document.getElementById('overlayMsg');
+  o.textContent = msg;
+  o.classList.add('active');
+}
+
+function hidePersistentOverlay() {
+  const o = document.getElementById('overlayMsg');
+  o.classList.remove('active');
+  o.textContent = '';
+}
+
+/* 3D ゲームエンジン */
+class BaseballGame3D {
+  constructor(canvasElement, gameData) {
+    this.canvas = canvasElement;
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x87ceeb);
+
+    const w = canvasElement.clientWidth;
+    const h = canvasElement.clientHeight;
+    this.camera = new THREE.PerspectiveCamera(75, w / h, 0.1, 1000);
+    this.renderer = new THREE.WebGLRenderer({ canvas: canvasElement, antialias: true });
+    this.renderer.setSize(w, h);
+    this.renderer.shadowMap.enabled = true;
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    this.scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(50, 50, 50);
+    directionalLight.castShadow = true;
+    this.scene.add(directionalLight);
+
+    this.gameData = gameData;
+    this.currentCameraPreset = 'CATCHER_BEHIND';
+    this.cameraPresets = this.initializeCameras();
+    
+    this.createField();
+    this.setupInitialCamera();
+    
+    this.animate();
+  }
+
+  initializeCameras() {
+    return {
+      CATCHER_BEHIND: { position: [0, 1.5, -20], target: [0, 1.0, 5], fov: 65, name: 'キャッチャー後方' },
+      PITCHER_MOUND: { position: [0, 1.8, 18], target: [0, 0.5, -30], fov: 60, name: 'マウンド前方' },
+      THIRD_BASE_STAND: { position: [-25, 2.0, 0], target: [8, 0, 0], fov: 75, name: '3塁側スタンド' },
+      FIRST_BASE_STAND: { position: [25, 2.0, 0], target: [-8, 0, 0], fov: 75, name: '1塁側スタンド' }
+    };
+  }
+
+  setupInitialCamera() {
+    const preset = this.cameraPresets[this.currentCameraPreset];
+    this.camera.position.set(...preset.position);
+    this.camera.lookAt(...preset.target);
+    this.camera.fov = preset.fov;
+    this.camera.updateProjectionMatrix();
+  }
+
+  switchCamera(cameraName) {
+    if (!this.cameraPresets[cameraName]) return;
+    this.currentCameraPreset = cameraName;
+    const preset = this.cameraPresets[cameraName];
+    this.camera.position.set(...preset.position);
+    this.camera.lookAt(...preset.target);
+  }
+
+  createField() {
+    const groundGeometry = new THREE.CircleGeometry(50, 64);
+    const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+
+    const moundGeometry = new THREE.ConeGeometry(2, 0.5, 32);
+    const moundMaterial = new THREE.MeshLambertMaterial({ color: 0xa0826d });
+    const mound = new THREE.Mesh(moundGeometry, moundMaterial);
+    mound.position.z = 18;
+    mound.position.y = 0.25;
+    mound.castShadow = true;
+    this.scene.add(mound);
+
+    this.createBase(0, 0, 0, 'white');
+    this.createBase(27.4, 0, -27.4, 'white');
+    this.createBase(0, 0, -36.5, 'white');
+    this.createBase(-27.4, 0, -27.4, 'white');
+  }
+
+  createBase(x, y, z, color) {
+    const baseGeometry = new THREE.BoxGeometry(0.9, 0.15, 0.9);
+    const baseMaterial = new THREE.MeshLambertMaterial({ color: color === 'white' ? 0xffffff : 0xffd700 });
+    const base = new THREE.Mesh(baseGeometry, baseMaterial);
+    base.position.set(x, y, z);
+    base.castShadow = true;
+    base.receiveShadow = true;
+    this.scene.add(base);
+  }
+
+  animate() {
+    requestAnimationFrame(() => this.animate());
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+/* DOMイベント */
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.google && google.script && google.script.run) {
+    google.script.run.withSuccessHandler(function(data) {
+      state.players = data.players || [];
+      state.teams = data.teams || [];
+      state.pitchTypes = data.pitchTypes || [];
+      state.abilities = data.abilities || [];
+      refreshUIFromState();
+      log('データ読み込み完了');
+    }).getGameSetup();
+  }
+
+  document.body.addEventListener('click', function(ev) {
+    const btn = ev.target.closest('button[data-action]');
+    if (btn) {
+      ev.preventDefault();
+      handleAction(btn.dataset.action, btn);
+    }
+  });
+
+  document.querySelectorAll('button[data-camera]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      document.querySelectorAll('button[data-camera]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (state.game) state.game.switchCamera(btn.dataset.camera);
+    });
+  });
+
+  document.getElementById('playerPosition').addEventListener('change', function() {
+    updatePositionWarning();
+    const isPitch = ['先発', '中継ぎ', '抑え'].indexOf(this.value) >= 0;
+    document.getElementById('pitcherSection').style.display = isPitch ? 'block' : 'none';
+    if (isPitch) buildPitchRatioUI();
+  });
+});
+
+function updatePositionWarning() {
+  const pos = document.getElementById('playerPosition').value;
+  const warn = document.getElementById('positionWarning');
+  const isPitcher = ['先発', '中継ぎ', '抑え'].indexOf(pos) >= 0;
+  warn.textContent = '';
+  if (isPitcher) {
+    warn.textContent = '⚠ 投手です — 通常は打順を付けません。';
+  } else if (pos) {
+    warn.textContent = '守備位置: ' + pos + ' が設定されています（打順は別で管理）。';
+  }
+}
+
+function buildPitchRatioUI() {
+  const container = document.getElementById('pitchRatioContainer');
+  container.innerHTML = '';
+  state.pitchTypes.forEach(pt => {
+    const div = document.createElement('div');
+    div.className = 'pitchRatioItem';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.max = '100';
+    input.value = '10';
+    input.dataset.pitchId = pt.id;
+    const span = document.createElement('span');
+    span.textContent = pt.japaneseName || pt.name || pt.id;
+    div.appendChild(span);
+    div.appendChild(input);
+    container.appendChild(div);
+  });
+}
+
+function normalizePlayerFlags() {
+  state.players.forEach(p => {
+    p.isPitcher = ['先発', '中継ぎ', '抑え'].indexOf((p.position || '')) >= 0;
+  });
+}
+
+function refreshUIFromState() {
+  normalizePlayerFlags();
+
+  const pl = document.getElementById('playerList');
+  pl.innerHTML = '';
+  state.players.forEach(p => {
+    const d = document.createElement('div');
+    d.className = 'playerItem';
+    d.dataset.id = p.id;
+    const posText = p.position || '未設定';
+    d.textContent = p.name + ' (' + posText + ')' + (p.handedness === 'left' ? ' [左]' : '');
+    d.addEventListener('click', () => loadPlayerToForm(p.id));
+    pl.appendChild(d);
+  });
+
+  const tabs = document.getElementById('teamTabs');
+  tabs.innerHTML = '';
+  state.teams.forEach(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t.name;
+    b.addEventListener('click', () => {
+      state.currentTeam = state.teams.find(x => x.id === t.id);
+      document.getElementById('teamName').value = t.name;
+    });
+    tabs.appendChild(b);
+  });
+
+  const abl = document.getElementById('abilitiesList');
+  abl.innerHTML = '';
+  state.abilities.forEach(a => {
+    const id = a.id || a.name;
+    const label = document.createElement('label');
+    label.style.display = 'block';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = id;
+    cb.id = 'ability_' + id;
+    cb.style.marginRight = '8px';
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode((a.name || id)));
+    abl.appendChild(label);
+  });
+
+  const h = document.getElementById('homeTeamSelect');
+  const a = document.getElementById('awayTeamSelect');
+  const s = document.getElementById('supportTeamSelect');
+  [h, a, s].forEach(sel => {
+    if (sel) {
+      sel.innerHTML = '<option value="">--</option>';
+      state.teams.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = t.name;
+        sel.appendChild(o);
+      });
+    }
+  });
+}
+
+function loadPlayerToForm(playerId) {
+  const p = state.players.find(x => x.id === playerId);
+  if (!p) return;
+
+  document.getElementById('playerId').value = p.id || '';
+  document.getElementById('playerName').value = p.name || '';
+  document.getElementById('playerTeamId').value = p.teamId || '';
+  document.getElementById('playerPosition').value = p.position || '';
+  document.querySelectorAll('input[name="playerHandedness"]').forEach(r => {
+    r.checked = (r.value === (p.handedness || 'right'));
+  });
+
+  document.getElementById('stat_meet').value = p.meet || 50;
+  document.getElementById('stat_power').value = p.power || 50;
+  document.getElementById('stat_speed').value = p.speed || 50;
+  document.getElementById('stat_defense').value = p.defense || 50;
+  document.getElementById('stat_arm').value = p.arm || 50;
+  document.getElementById('stat_catching').value = p.catching || 50;
+  document.getElementById('stat_armAngle').value = p.armAngle || 45;
+  document.getElementById('stat_avgSpeed').value = p.avgSpeed || 140;
+  document.getElementById('stat_stamina').value = p.stamina || 80;
+  document.getElementById('stat_control').value = p.control || 70;
+
+  document.querySelectorAll('#abilitiesList input[type=checkbox]').forEach(cb => {
+    cb.checked = (p.specialAbilities || []).indexOf(cb.value) >= 0;
+  });
+
+  const isPitch = ['先発', '中継ぎ', '抑え'].indexOf((p.position || '')) >= 0;
+  document.getElementById('pitcherSection').style.display = isPitch ? 'block' : 'none';
+  if (isPitch) buildPitchRatioUI();
+
+  updatePositionWarning();
+}
+
+function handleAction(action, btn) {
+  btn.disabled = true;
+  setTimeout(() => btn.disabled = false, 500);
+
+  switch (action) {
+    case 'refresh':
+      if (google && google.script && google.script.run) {
+        showPersistentOverlay('データ読み込み中...');
+        google.script.run.withSuccessHandler(function(data) {
+          state.players = data.players || [];
+          state.teams = data.teams || [];
+          state.pitchTypes = data.pitchTypes || [];
+          state.abilities = data.abilities || [];
+          refreshUIFromState();
+          hidePersistentOverlay();
+          showOverlay('リフレッシュ完了');
+        }).getGameSetup();
+      }
+      break;
+
+    case 'create-practice':
+      if (!confirm('練習チームA/Bを作成します。よろしいですか？')) break;
+      if (google && google.script && google.script.run) {
+        showPersistentOverlay('練習チーム作成中...');
+        google.script.run.withSuccessHandler(function(res) {
+          google.script.run.withSuccessHandler(function(data) {
+            state.players = data.players || [];
+            state.teams = data.teams || [];
+            refreshUIFromState();
+            hidePersistentOverlay();
+            showOverlay('練習チーム作成完了');
+          }).getGameSetup();
+        }).createPracticeTeams();
+      }
+      break;
+
+    case 'save-team':
+      {
+        const teamName = document.getElementById('teamName').value || ('Team-' + Date.now());
+        const current = state.currentTeam || { playerIds: [] };
+        const team = { id: current.id, name: teamName, playerIds: current.playerIds || [] };
+        if (google && google.script && google.script.run) {
+          showPersistentOverlay('チーム保存中...');
+          google.script.run.withSuccessHandler(function(saved) {
+            google.script.run.withSuccessHandler(function(data) {
+              state.players = data.players || [];
+              state.teams = data.teams || [];
+              refreshUIFromState();
+              hidePersistentOverlay();
+              showOverlay('チームを保存しました');
+            }).getGameSetup();
+          }).saveTeam(team);
+        }
+      }
+      break;
+
+    case 'delete-team':
+      if (!state.currentTeam || !state.currentTeam.id) {
+        alert('削除するチームを選択してください');
+        break;
+      }
+      if (!confirm('チームを削除します。よろしいですか？')) break;
+      if (google && google.script && google.script.run) {
+        showPersistentOverlay('チーム削除中...');
+        google.script.run.withSuccessHandler(function(res) {
+          google.script.run.withSuccessHandler(function(data) {
+            state.players = data.players || [];
+            state.teams = data.teams || [];
+            refreshUIFromState();
+            hidePersistentOverlay();
+            showOverlay('チーム削除しました');
+          }).getGameSetup();
+        }).deleteTeam(state.currentTeam.id);
+      }
+      break;
+
+    case 'new-player':
+      {
+        document.getElementById('playerId').value = '';
+        document.getElementById('playerName').value = '新しい選手';
+        document.getElementById('playerTeamId').value = state.currentTeam ? state.currentTeam.id : '';
+        document.getElementById('playerPosition').value = '';
+        document.querySelectorAll('input[name="playerHandedness"]').forEach(r => r.checked = r.value === 'right');
+        document.getElementById('stat_meet').value = 50;
+        document.getElementById('stat_power').value = 50;
+        document.getElementById('stat_speed').value = 50;
+        document.getElementById('stat_defense').value = 50;
+        document.getElementById('stat_arm').value = 50;
+        document.getElementById('stat_catching').value = 50;
+        document.getElementById('stat_armAngle').value = 45;
+        document.getElementById('stat_avgSpeed').value = 140;
+        document.getElementById('stat_stamina').value = 80;
+        document.getElementById('stat_control').value = 70;
+        document.querySelectorAll('#abilitiesList input[type=checkbox]').forEach(cb => cb.checked = false);
+        document.getElementById('pitcherSection').style.display = 'none';
+        updatePositionWarning();
+      }
+      break;
+
+    case 'save-player':
+      {
+        const selected = Array.from(document.querySelectorAll('#abilitiesList input[type=checkbox]')).filter(cb => cb.checked).map(cb => cb.value);
+        const position = document.getElementById('playerPosition').value || '';
+        const handedness = document.querySelector('input[name="playerHandedness"]:checked').value;
+        const player = {
+          id: document.getElementById('playerId').value || null,
+          teamId: document.getElementById('playerTeamId').value || (state.currentTeam ? state.currentTeam.id : ''),
+          teamRole: '',
+          name: document.getElementById('playerName').value || '匿名',
+          position: position,
+          isPitcher: ['先発', '中継ぎ', '抑え'].indexOf(position) >= 0,
+          handedness: handedness,
+          meet: Number(document.getElementById('stat_meet').value || 50),
+          power: Number(document.getElementById('stat_power').value || 50),
+          speed: Number(document.getElementById('stat_speed').value || 50),
+          defense: Number(document.getElementById('stat_defense').value || 50),
+          arm: Number(document.getElementById('stat_arm').value || 50),
+          catching: Number(document.getElementById('stat_catching').value || 50),
+          armAngle: Number(document.getElementById('stat_armAngle').value || 45),
+          avgSpeed: Number(document.getElementById('stat_avgSpeed').value || 140),
+          stamina: Number(document.getElementById('stat_stamina').value || 80),
+          control: Number(document.getElementById('stat_control').value || 70),
+          pitches: [],
+          specialAbilities: selected
+        };
+
+        if (position && ['先発', '中継ぎ', '抑え'].indexOf(position) >= 0) {
+          const ratioList = [];
+          document.querySelectorAll('#pitchRatioContainer input[type=number]').forEach(input => {
+            const ratio = Number(input.value || 0);
+            if (ratio > 0) {
+              ratioList.push({
+                pitchTypeId: input.dataset.pitchId,
+                ratio: ratio
+              });
+            }
+          });
+          
+          if (google && google.script && google.script.run) {
+            showPersistentOverlay('選手保存中...');
+            const playerId = player.id;
+            google.script.run.withSuccessHandler(function(saved) {
+              google.script.run.withSuccessHandler(function() {
+                google.script.run.withSuccessHandler(function(data) {
+                  state.players = data.players || [];
+                  state.teams = data.teams || [];
+                  refreshUIFromState();
+                  hidePersistentOverlay();
+                  showOverlay('選手と球種割合を保存しました');
+                }).getGameSetup();
+              }).savePitchRatios(saved.id || playerId, ratioList);
+            }).savePlayer(player);
+          }
+        } else {
+          if (google && google.script && google.script.run) {
+            showPersistentOverlay('選手保存中...');
+            google.script.run.withSuccessHandler(function(saved) {
+              google.script.run.withSuccessHandler(function(data) {
+                state.players = data.players || [];
+                state.teams = data.teams || [];
+                refreshUIFromState();
+                hidePersistentOverlay();
+                showOverlay('選手を保存しました');
+              }).getGameSetup();
+            }).savePlayer(player);
+          }
+        }
+      }
+      break;
+
+    case 'auto-pitch-ratio':
+      {
+        const inputs = document.querySelectorAll('#pitchRatioContainer input[type=number]');
+        const ratio = Math.floor(100 / inputs.length);
+        inputs.forEach((inp, i) => {
+          inp.value = (i === inputs.length - 1) ? (100 - ratio * (inputs.length - 1)) : ratio;
+        });
+        showOverlay('自動配分完了');
+      }
+      break;
+
+    case 'delete-player':
+      {
+        const pid = document.getElementById('playerId').value;
+        if (!pid) {
+          alert('削除する選手を選択してください');
+          break;
+        }
+        if (!confirm('選手を削除します。よろしいですか？')) break;
+        if (google && google.script && google.script.run) {
+          showPersistentOverlay('選手削除中...');
+          google.script.run.withSuccessHandler(function(res) {
+            google.script.run.withSuccessHandler(function(data) {
+              state.players = data.players || [];
+              state.teams = data.teams || [];
+              refreshUIFromState();
+              hidePersistentOverlay();
+              showOverlay('選手を削除しました');
+            }).getGameSetup();
+          }).deletePlayer(pid);
+        }
+      }
+      break;
+
+    case 'launch-game':
+      {
+        const homeId = document.getElementById('homeTeamSelect').value;
+        const awayId = document.getElementById('awayTeamSelect').value;
+        const supportId = document.getElementById('supportTeamSelect').value;
+        const innings = Number(document.getElementById('inningsInput').value || 3);
+
+        if (!homeId || !awayId) {
+          alert('ホーム・ビジターチームを選択してください');
+          break;
+        }
+
+        launchGame(homeId, awayId, supportId, innings);
+      }
+      break;
+
+    case 'end-game':
+      {
+        if (state.game) {
+          state.game = null;
+          document.getElementById('gamePanel').style.display = 'none';
+          showOverlay('試合を終了しました');
+          log('試合終了');
+        }
+      }
+      break;
+
+    default:
+      console.warn('unknown action', action);
+  }
+}
+
+function launchGame(homeTeamId, awayTeamId, supportTeamId, innings) {
+  showPersistentOverlay('ゲーム起動中...');
+  const gamePanel = document.getElementById('gamePanel');
+  gamePanel.style.display = 'block';
+
+  const canvas = document.getElementById('gameCanvas');
+  state.game = new BaseballGame3D(canvas, {
+    homeTeamId: homeTeamId,
+    awayTeamId: awayTeamId,
+    supportTeamId: supportTeamId,
+    innings: innings,
+    players: state.players,
+    pitchTypes: state.pitchTypes
+  });
+
+  log('試合開始: ホーム vs ビジター, ' + innings + '回');
+  hidePersistentOverlay();
+  showOverlay('ゲーム開始！');
+
+  document.getElementById('gameScore').textContent = 'スコア: ホーム 0 - 0 ビジター';
+  document.getElementById('gameState').textContent = '試合状況: 1回表 ホーム攻撃';
+}
+
+window.refreshData = function() {
+  if (google && google.script && google.script.run) {
+    showPersistentOverlay('データ読み込み中...');
+    google.script.run.withSuccessHandler(function(data) {
+      state.players = data.players || [];
+      state.teams = data.teams || [];
+      state.pitchTypes = data.pitchTypes || [];
+      state.abilities = data.abilities || [];
+      refreshUIFromState();
+      hidePersistentOverlay();
+      showOverlay('更新しました');
+    }).getGameSetup();
+  }
+};
+</script>
+</body>
+</html>
